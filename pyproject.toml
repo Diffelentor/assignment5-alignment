@@ -13,7 +13,7 @@ dependencies = [
     "pylatexenc==2.10",
     "notebook>=7.4.2",
     "pytest>=8.3.5",
-    "torch",
+    "torch~=2.9.0"
     "tqdm>=4.67.1",
     "transformers>=4.50.0",
     "typer>=0.15.4",
@@ -41,3 +41,10 @@ log_cli_level = "WARNING"
 name = "flash-attn"
 version = "2.7.4.post1"
 requires-dist = ["torch", "einops", "setuptools"]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
+ 
+[tool.uv.pip]
+index-url = "https://mirrors.aliyun.com/pypi/simple"

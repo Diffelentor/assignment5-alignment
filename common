@@ -1,0 +1,11 @@
+source /etc/network_turbo
+unset http_proxy && unset https_proxy
+uv pip install .
+uv run utils/model_download.py
+export HF_ENDPOINT=https://hf-mirror.com
+export UV_DEFAULT_INDEX="https://mirrors.aliyun.com/pypi/simple"
+
+source .venv/bin/activate
+
+HF_ENDPOINT=https://hf-mirror.com 
+huggingface-cli download Qwen/Qwen2.5-Math-1.5B --local-dir /root/autodl-fs/models/Qwen2.5-Math-1.5B --local-dir-use-symlinks False
