@@ -69,8 +69,9 @@ def evaluate_vllm(
 # -----------------------------
 if __name__ == "__main__":
     # 模型路径
-    MODEL_PATH = "/models/Qwen2.5-Math-1.5B"
-    DATA_PATH = "/data/MATH/test.jsonl"
+    # MODEL_PATH = "/models/Qwen2.5-Math-1.5B"
+    MODEL_PATH = "/root/autodl-fs/models/Qwen2.5-Math-1.5B"
+    DATA_PATH = "/root/assignment5-alignment/data/gsm8k/test.jsonl"
     OUTPUT_PATH = "qwen2.5_math_eval_results.jsonl"
 
     # 载入数据
@@ -79,7 +80,7 @@ if __name__ == "__main__":
     with open(DATA_PATH, "r", encoding="utf-8") as f:
         for line in f:
             item = json.loads(line)
-            q = item["problem"]
+            q = item["question"]
             a = item["answer"]
             questions.append(q)
             answers.append(a)
