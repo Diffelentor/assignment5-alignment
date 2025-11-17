@@ -7,6 +7,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerBase
+import torch.nn.functional as F
 
 
 def run_tokenize_prompt_and_output(
@@ -31,7 +32,33 @@ def run_tokenize_prompt_and_output(
             "response_mask": torch.Tensor of shape (batch_size, max(prompt_and_output_lens) - 1):
                 a mask on the response tokens in `labels`.
     """
-    raise NotImplementedError
+
+    input_ids_list = []
+    response_mask_list = []
+
+    for prompt, output in zip(prompt_strs, output_strs):
+        prompt_enc = tokenizer(prompt, add_special_tokens=False)
+        output_enc = tokenizer(output, add_special_tokens=False)
+        full_input = prompt_enc['input_ids'] + output_enc['input_ids']
+        response_mask = [0] * len(prompt_enc['input_ids']) + [1] * len(output_enc['input_ids'])
+        input_ids_list.append(torch.tensor(full_input, dtype=torch.long))
+        response_mask_list.append(torch.tensor(response_mask, dtype=torch.long))
+
+    batch_size = len(input_ids_list)
+    max_len = max(len(ids) for ids in input_ids_list)
+    input_ids_batch = torch.full((batch_size, max_len), tokenizer.pad_token_id, dtype=torch.long)
+    response_mask_batch = torch.zeros((batch_size, max_len), dtype=torch.long)
+
+    for i, (ids, mask) in enumerate(zip(input_ids_list, response_mask_list)):
+        seq_len = len(ids)
+        input_ids_batch[i, :seq_len] = ids
+        response_mask_batch[i, :seq_len] = mask
+
+    return {
+        "input_ids": input_ids_batch[:, :-1],               # (batch, max_len-1)
+        "labels": input_ids_batch[:, 1:],                   # (batch, max_len-1)
+        "response_mask": response_mask_batch[:, 1:]         # (batch, max_len-1)
+    }
 
 
 def run_compute_group_normalized_rewards(
@@ -82,7 +109,18 @@ def run_compute_group_normalized_rewards(
 
 def run_compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     """Get the entropy of the logits (i.e., entropy of the final dimension)."""
-    raise NotImplementedError
+
+    # logits: [B, S, V]
+    # 使用 logsumexp 归一化
+    log_probs = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+
+    # p = softmax(logits) = exp(log_probs)
+    probs = torch.exp(log_probs)
+
+    # entropy = -sum(p * log p)
+    entropy = -(probs * log_probs).sum(dim=-1)
+
+    return entropy
 
 
 def run_get_response_log_probs(
@@ -114,7 +152,29 @@ def run_get_response_log_probs(
                 we have not masked out the token indices corresponding to the prompt
                 or padding; that is done in the train loop.
     """
-    raise NotImplementedError
+    
+    # Get logits from model
+    with torch.no_grad():
+        logits = model(input_ids).logits # (batch_size, seq_len, vocab_size)
+
+    # Compute log-probabilities for each token in the labels
+    log_probs = F.log_softmax(logits, dim=-1)  # (batch_size, seq_len, vocab_size)
+
+    # 从 (batch_size, seq_len, vocab_size) 取出对应 labels 的 log-probs （因为我们计算误差时只针对真实label计算）
+    # Result shape: (batch_size, seq_len)
+    log_probs_for_labels = torch.gather(
+        log_probs, dim=-1, index=labels.unsqueeze(-1)
+    ).squeeze(-1)
+
+    result = {
+        "log_probs": log_probs_for_labels
+    }
+
+    if return_token_entropy:
+        token_entropy = run_compute_entropy(logits)  # (batch_size, seq_len)
+        result["token_entropy"] = token_entropy
+
+    return result
 
 
 def run_compute_naive_policy_gradient_loss(
@@ -203,7 +263,29 @@ def run_sft_microbatch_train_step(
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     """Compute the policy gradient loss and backprop its gradients for a microbatch.
     """
-    raise NotImplementedError
+    batch_size, seq_length = policy_log_probs.shape
+    # 1. 计算 per-token loss：交叉熵 = -log prob
+    per_token_loss = -policy_log_probs    # (batch, seq)
+
+    # 2. 只对 response token 求和
+    # 3. 归一化 normalize_constant
+    normalized_loss_per_batch = run_masked_normalize(per_token_loss,response_mask,normalize_constant=normalize_constant)
+
+    # 4. 适配 gradient accumulation（除以 microbatch 个数）
+    micro_loss = normalized_loss_per_batch / gradient_accumulation_steps
+
+    # 5. backward() 但不 step（外部会累积）
+    micro_loss.backward()
+
+    # 6. metadata（作业要求一般需要返回这些）
+    metadata = {
+        "masked_loss": (per_token_loss * response_mask).sum(),
+        "normalized_loss": normalized_loss_per_batch.detach(),
+        "micro_loss": micro_loss.detach(),
+        "num_response_tokens": response_mask.sum().detach(),
+    }
+
+    return micro_loss.detach(), metadata
 
     
 def run_grpo_microbatch_train_step(
@@ -267,7 +349,11 @@ def run_masked_normalize(
         torch.Tensor, the normalized sum, where masked elements
             (mask=0) don't contribute to the sum.
     """
-    raise NotImplementedError
+    
+    masked_tensor = tensor * mask
+    sum_vals = masked_tensor.sum(dim=dim)
+    normalized = sum_vals / normalize_constant
+    return normalized
 
 
 """
