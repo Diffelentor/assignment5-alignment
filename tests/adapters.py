@@ -59,6 +59,42 @@ def run_tokenize_prompt_and_output(
         "labels": input_ids_batch[:, 1:],                   # (batch, max_len-1)
         "response_mask": response_mask_batch[:, 1:]         # (batch, max_len-1)
     }
+    
+    
+    # prompts = [b["prompt"] for b in prompt_strs]
+    # responses = [b["response"] for b in output_strs]
+    # prompts = prompt_strs
+    # responses = output_strs
+
+    # # tokenize prompts (for computing prompt lengths)
+    # tokenized_prompts = tokenizer(prompts, padding=True,  return_tensors="pt")
+    # prompt_lens = tokenized_prompts["attention_mask"].sum(dim=1)
+
+    # # tokenize full sequence
+    # full_texts = [p + r for p, r in zip(prompts, responses)]
+    # tokenized_fulls = tokenizer(full_texts, padding=True,  return_tensors="pt")
+
+    # input_ids = tokenized_fulls["input_ids"]
+    # attention_mask = tokenized_fulls["attention_mask"]
+
+    # # shift input_ids / labels for causal LM
+    # labels = input_ids.clone()
+    # for i, p_len in enumerate(prompt_lens):
+    #     labels[i, :p_len] = -100  # mask prompt
+    # response_mask = (labels != -100).long()
+
+    # # shift for self-regressive training
+    # input_ids = input_ids[:, :-1]
+    # labels    = labels[:, 1:]
+    # attention_mask = attention_mask[:, 1:]
+    # response_mask = response_mask[:, 1:]
+
+    # return {
+    #     "input_ids": input_ids,
+    #     "labels": labels,
+    #     # "attention_mask": attention_mask,
+    #     "response_mask": response_mask,
+    # }
 
 
 def run_compute_group_normalized_rewards(
@@ -128,6 +164,7 @@ def run_get_response_log_probs(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
     return_token_entropy: bool,
+    attention_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Get the conditional log-probs of the response given the prompt,
         and optionally the entropy of the next token predictions.
@@ -155,7 +192,7 @@ def run_get_response_log_probs(
     
     # Get logits from model
     with torch.no_grad():
-        logits = model(input_ids).logits # (batch_size, seq_len, vocab_size)
+        logits = model(input_ids, attention_mask=attention_mask).logits # (batch_size, seq_len, vocab_size)
 
     # Compute log-probabilities for each token in the labels
     log_probs = F.log_softmax(logits, dim=-1)  # (batch_size, seq_len, vocab_size)
@@ -269,7 +306,7 @@ def run_sft_microbatch_train_step(
 
     # 2. 只对 response token 求和
     # 3. 归一化 normalize_constant
-    normalized_loss_per_batch = run_masked_normalize(per_token_loss,response_mask,normalize_constant=normalize_constant)
+    normalized_loss_per_batch = run_masked_normalize(per_token_loss,response_mask,normalize_constant=normalize_constant) / batch_size
 
     # 4. 适配 gradient accumulation（除以 microbatch 个数）
     micro_loss = normalized_loss_per_batch / gradient_accumulation_steps

@@ -12,6 +12,7 @@ source .venv/bin/activate
 
 HF_ENDPOINT=https://hf-mirror.com 
 huggingface-cli download Qwen/Qwen2.5-Math-1.5B --local-dir /root/autodl-fs/models/Qwen2.5-Math-1.5B --local-dir-use-symlinks False
+huggingface-cli download Qwen/Qwen2.5-Math-1.5B --local-dir models/Qwen2.5-Math-1.5B --local-dir-use-symlinks False
 
 uv run utils/evaluate_vllm.py
 
