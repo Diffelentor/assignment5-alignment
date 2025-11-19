@@ -10,6 +10,33 @@ from vllm import LLM, SamplingParams
 # -----------------------------
 # 该函数用于解析模型输出并判断是否正确
 from cs336_alignment.drgrpo_grader import r1_zero_reward_fn
+from vllm.model_executor import set_random_seed as vllm_set_random_seed
+from unittest.mock import patch
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+
+def init_vllm(model_id: str, device: str, seed: int, gpu_memory_utilization: float = 0.85):
+# def init_vllm(model_id: str, seed: int, gpu_memory_utilization: float = 0.85):
+    vllm_set_random_seed(seed)
+    world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
+    profiling_patch = patch(
+        "vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
+        return_value=None,
+    )
+    with world_size_patch, profiling_patch:
+        return LLM(
+            model=model_id,
+            # device=device,
+            dtype=torch.bfloat16,
+            enable_prefix_caching=True,
+            gpu_memory_utilization=gpu_memory_utilization,
+        )
+        
+def load_policy_into_vllm_instance(policy: torch.nn.Module, llm: LLM):
+    state_dict = policy.state_dict()
+    llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
+    llm_model.load_weights(state_dict.items())
 
 # -----------------------------
 # 2. r1_zero prompt 模板
@@ -90,15 +117,19 @@ if __name__ == "__main__":
 
     # vLLM 推理配置
     sampling_params = SamplingParams(
-        temperature=1.0,
-        top_p=1.0,
+        temperature=0.0,
+        # top_p=1.0,
         max_tokens=1024,
         stop=["</answer>"],
         include_stop_str_in_output=True,
     )
 
     print("[INFO] Initializing vLLM model...")
-    llm = LLM(model=MODEL_PATH)
+    # llm = LLM(model=MODEL_PATH)
+    llm = init_vllm(model_id=MODEL_PATH, device="cuda", seed=42)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_PATH)
+    load_policy_into_vllm_instance(policy=None, llm=llm)
+    
 
     # 运行评估
     results = evaluate_vllm(
